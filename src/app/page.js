@@ -1,104 +1,95 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import TourGuide from "@/components/TourGuide";
 
 export default function Home() {
-  // State untuk navigasi menu ( 'login' atau 'register' )
-  const [mode, setMode] = useState("login");
-
-  // State untuk form input
+  const [authMode, setAuthMode] = useState("login"); // Pilihan: "login" atau "register"
+  
+  // State Input Form
   const [namaInput, setNamaInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
 
   const [siswa, setSiswa] = useState(null);
+  const [daftarModul, setDaftarModul] = useState([]);
+  const [progressSiswa, setProgressSiswa] = useState({});
+  const [attemptCounts, setAttemptCounts] = useState({});
+
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // 1. Auto-Login jika token ID masih tersimpan di browser
+  const [hasMounted, setHasMounted] = useState(false);
+
   useEffect(() => {
+    setHasMounted(true);
     const savedId = localStorage.getItem("netlearn_siswa_id");
     if (savedId) {
-      ambilDataSiswa(savedId);
+      ambilDataLengkapSiswa(savedId);
     } else {
       setLoading(false);
     }
   }, []);
 
-  const ambilDataSiswa = async (id) => {
+  const ambilDataLengkapSiswa = async (idSiswa) => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("user_progress")
-      .select("*")
-      .eq("id", id)
-      .single();
+    try {
+      const { data: dataSiswa } = await supabase
+        .from("user_progress")
+        .select("*")
+        .eq("id", idSiswa)
+        .single();
 
-    if (data) {
-      setSiswa(data);
-    } else {
-      localStorage.removeItem("netlearn_siswa_id");
+      if (!dataSiswa) {
+        localStorage.removeItem("netlearn_siswa_id");
+        setLoading(false);
+        return;
+      }
+      setSiswa(dataSiswa);
+
+      const { data: modulData } = await supabase
+        .from("master_modul")
+        .select("*")
+        .order("urutan", { ascending: true });
+      setDaftarModul(modulData || []);
+
+      const { data: progressData } = await supabase
+        .from("siswa_progress_modul")
+        .select("*")
+        .eq("siswa_id", idSiswa);
+      const mapProgress = {};
+      progressData?.forEach((prog) => {
+        mapProgress[prog.modul_id] = prog;
+      });
+      setProgressSiswa(mapProgress);
+
+      const { data: attemptData } = await supabase
+        .from("kuis_attempts")
+        .select("modul_id")
+        .eq("siswa_id", idSiswa);
+      const mapAttempts = {};
+      attemptData?.forEach((att) => {
+        mapAttempts[att.modul_id] = (mapAttempts[att.modul_id] || 0) + 1;
+      });
+      setAttemptCounts(mapAttempts);
+
+    } catch (err) {
+      console.error("Gagal memuat data:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  // 2. Fungsi Logika REGISTRASI (Daftar Akun)
-  const handleRegister = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     if (!namaInput.trim() || !passwordInput.trim()) return;
-
     setLoading(true);
     setErrorMsg("");
     setSuccessMsg("");
 
-    // Cek apakah username/nama sudah dipakai orang lain
-    const { data: userExist } = await supabase
-      .from("user_progress")
-      .select("nama_siswa")
-      .eq("nama_siswa", namaInput.trim())
-      .maybeSingle();
-
-    if (userExist) {
-      setErrorMsg(
-        "Nama ini sudah terdaftar! Silakan gunakan nama lain atau langsung login.",
-      );
-      setLoading(false);
-      return;
-    }
-
-    // Jika aman, masukkan data akun baru beserta password-nya
-    const { data: userBaru, error: insertError } = await supabase
-      .from("user_progress")
-      .insert([
-        {
-          nama_siswa: namaInput.trim(),
-          password: passwordInput.trim(),
-        },
-      ])
-      .select()
-      .single();
-
-    if (userBaru) {
-      setSuccessMsg("Pendaftaran berhasil! Silakan masuk ke menu Login.");
-      setMode("login");
-      setPasswordInput(""); // Reset password input demi keamanan
-    } else {
-      setErrorMsg("Gagal mendaftar akun. Coba lagi.");
-      console.error(insertError);
-    }
-    setLoading(false);
-  };
-
-  // 3. Fungsi Logika LOGIN (Masuk Akun)
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    if (!namaInput.trim() || !passwordInput.trim()) return;
-
-    setLoading(true);
-    setErrorMsg("");
-
-    // Cari siswa berdasarkan nama DAN password yang cocok
-    const { data: user, error } = await supabase
+    const { data: user } = await supabase
       .from("user_progress")
       .select("*")
       .eq("nama_siswa", namaInput.trim())
@@ -107,241 +98,353 @@ export default function Home() {
 
     if (user) {
       localStorage.setItem("netlearn_siswa_id", user.id);
-      setSiswa(user);
+      await ambilDataLengkapSiswa(user.id);
     } else {
-      setErrorMsg("Nama atau Password salah! Periksa kembali.");
+      setErrorMsg("Nama atau Password salah. Periksa kembali data Anda.");
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const getFeedbackKuis = (skor) => {
-    if (skor === null || skor === undefined)
-      return "Kamu belum menguji kemampuanmu. Yuk, mulai kuis!";
-    if (skor < 70)
-      return `Skor terakhir: ${skor}%. Kamu belum tuntas, yuk coba lagi! 💪`;
-    return `Selamat! Skor kamu ${skor}%. Kamu telah menuntaskan modul ini! 🎓`;
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (!namaInput.trim() || !passwordInput.trim()) return;
+    setLoading(true);
+    setErrorMsg("");
+    setSuccessMsg("");
+
+    try {
+      const { data: userLama } = await supabase
+        .from("user_progress")
+        .select("id")
+        .eq("nama_siswa", namaInput.trim())
+        .maybeSingle();
+
+      if (userLama) {
+        setErrorMsg("Nama siswa sudah terdaftar. Gunakan nama lain.");
+        setLoading(false);
+        return;
+      }
+
+      const { error } = await supabase.from("user_progress").insert([
+        {
+          nama_siswa: namaInput.trim(),
+          password: passwordInput.trim(),
+          materi_modul1_selesai: 0,
+          materi_modul2_selesai: 0,
+          skor_modul1: null,
+          skor_modul2: null,
+        },
+      ]);
+
+      if (error) throw error;
+
+      setSuccessMsg("Akun berhasil dibuat! Silakan masuk menggunakan akun baru Anda.");
+      setAuthMode("login");
+      setPasswordInput("");
+    } catch (err) {
+      console.error("Gagal registrasi:", err);
+      setErrorMsg("Terjadi kesalahan sistem saat mendaftar.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (loading) {
+  const gantiModeAuth = (mode) => {
+    setErrorMsg("");
+    setSuccessMsg("");
+    setNamaInput("");
+    setPasswordInput("");
+    setAuthMode(mode);
+  };
+
+  if (!hasMounted || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-2"></div>
-          <p className="text-gray-500 text-sm">Memproses enkripsi data...</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-3"></div>
+          <p className="text-slate-400 font-medium text-xs tracking-wider uppercase">Memuat halaman...</p>
         </div>
       </div>
     );
   }
 
-  // --- TAMPILAN AUTH: LOGIN & REGISTER ---
+  // ====================================================================
+  // GERBANG 1: AUTHENTICATION SCREEN (SINGLE FLOATING CARD)
+  // ====================================================================
   if (!siswa) {
     return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 w-full max-w-md">
-          <h1 className="text-2xl font-bold text-gray-800 text-center mb-1">
-            NetLearn: Fase E
-          </h1>
-          <p className="text-gray-400 text-xs text-center mb-6 uppercase tracking-wider font-semibold">
-            {mode === "login"
-              ? "🔑 Menu Masuk Siswa"
-              : "📝 Pendaftaran Akun Baru"}
-          </p>
+      <main className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        {/* Dekorasi Ornamen Background Bulat Halus (Sesuai gambar referensi) */}
+        <div className="absolute top-1/4 left-1/3 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute bottom-1/4 right-1/3 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none"></div>
 
-          {successMsg && (
-            <p className="p-3 bg-green-50 text-green-600 rounded-xl text-xs font-semibold text-center mb-4">
-              {successMsg}
-            </p>
-          )}
+        {/* Header Aplikasi Mini */}
+        <div className="mb-8 text-center relative z-10">
+          <h1 className="text-2xl font-black tracking-widest text-white uppercase">NetLearn</h1>
+          <p className="text-[10px] text-slate-400 font-semibold tracking-wider mt-1 uppercase">Platform Edukasi Jaringan Komputer</p>
+        </div>
+
+        {/* Card Utama (Akan berganti isi sesuai state authMode) */}
+        <div className="w-full max-w-md bg-white/5 border border-white/10 backdrop-blur-md p-8 rounded-3xl shadow-2xl relative z-10 transition-all duration-300 hover:border-white/25">
+          
+          {/* Notifikasi Internal Card */}
           {errorMsg && (
-            <p className="p-3 bg-red-50 text-red-500 rounded-xl text-xs font-semibold text-center mb-4">
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-xs font-medium text-center">
               {errorMsg}
-            </p>
+            </div>
+          )}
+          {successMsg && (
+            <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-medium text-center">
+              {successMsg}
+            </div>
           )}
 
-          <form
-            onSubmit={mode === "login" ? handleLogin : handleRegister}
-            className="space-y-4"
-          >
+          {authMode === "login" ? (
+            /* =========================================================
+               TAMPILAN CARD: LOG IN
+               ========================================================= */
             <div>
-              <label className="text-xs font-bold text-gray-600 uppercase">
-                Nama Lengkap
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Masukkan namamu..."
-                value={namaInput}
-                onChange={(e) => setNamaInput(e.target.value)}
-                className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 bg-slate-50 text-gray-800 text-sm"
-              />
-            </div>
+              <div className="flex justify-between items-center mb-6">
+                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Portal Masuk</span>
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+              </div>
+              
+              <h2 className="text-2xl font-bold text-white tracking-tight mb-2">Log in</h2>
+              <p className="text-xs text-slate-400 mb-6 font-medium">Gunakan akun Anda untuk mengakses dashboard belajar.</p>
+              
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Nama Siswa</label>
+                  <input
+                    type="text"
+                    placeholder="Masukkan nama lengkap..."
+                    value={namaInput}
+                    onChange={(e) => setNamaInput(e.target.value)}
+                    className="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:bg-white/10 transition-all"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Kata Sandi</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    className="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:bg-white/10 transition-all"
+                    required
+                  />
+                </div>
 
+                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white p-3.5 rounded-xl text-xs font-bold tracking-wide mt-6 transition-all shadow-lg active:scale-[0.99]">
+                  Masuk Sekarang
+                </button>
+              </form>
+
+              <div className="mt-6 pt-4 border-t border-white/5 text-center">
+                <p className="text-xs text-slate-400">
+                  Belum memiliki akun?{" "}
+                  <button onClick={() => gantiModeAuth("register")} className="text-blue-400 hover:underline font-bold transition-all">
+                    Register di sini
+                  </button>
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* =========================================================
+               TAMPILAN CARD: CREATE ACCOUNT (REGISTER)
+               ========================================================= */
             <div>
-              <label className="text-xs font-bold text-gray-600 uppercase">
-                Kata Sandi (Password)
-              </label>
-              <input
-                type="password"
-                required
-                placeholder="Masukkan password..."
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 bg-slate-50 text-gray-800 text-sm"
-              />
+              <div className="flex justify-between items-center mb-6">
+                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Pendaftaran</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              </div>
+              
+              <h2 className="text-2xl font-bold text-white tracking-tight mb-2">Create Account</h2>
+              <p className="text-xs text-slate-400 mb-6 font-medium">Daftarkan nama Anda untuk merekam riwayat kuis.</p>
+              
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Nama Lengkap Siswa</label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Budi Santoso"
+                    value={namaInput}
+                    onChange={(e) => setNamaInput(e.target.value)}
+                    className="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 focus:bg-white/10 transition-all"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Buat Kata Sandi</label>
+                  <input
+                    type="password"
+                    placeholder="Minimal 4 karakter..."
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    className="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 focus:bg-white/10 transition-all"
+                    required
+                  />
+                </div>
+
+                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-3.5 rounded-xl text-xs font-bold tracking-wide mt-6 transition-all shadow-lg active:scale-[0.99]">
+                  Daftarkan Akun
+                </button>
+              </form>
+
+              <div className="mt-6 pt-4 border-t border-white/5 text-center">
+                <p className="text-xs text-slate-400">
+                  Sudah memiliki akun?{" "}
+                  <button onClick={() => gantiModeAuth("login")} className="text-emerald-400 hover:underline font-bold transition-all">
+                    Log in di sini
+                  </button>
+                </p>
+              </div>
             </div>
+          )}
 
-            <button
-              type="submit"
-              className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg active:scale-98 transition-transform text-sm"
-            >
-              {mode === "login" ? "Masuk ke Aplikasi" : "Daftar Sekarang"}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center border-t border-gray-100 pt-4">
-            {mode === "login" ? (
-              <p className="text-xs text-gray-500">
-                Belum punya akun?{" "}
-                <button
-                  onClick={() => {
-                    setMode("register");
-                    setErrorMsg("");
-                  }}
-                  className="text-blue-600 font-bold underline"
-                >
-                  Daftar di sini
-                </button>
-              </p>
-            ) : (
-              <p className="text-xs text-gray-500">
-                Sudah punya akun?{" "}
-                <button
-                  onClick={() => {
-                    setMode("login");
-                    setErrorMsg("");
-                  }}
-                  className="text-blue-600 font-bold underline"
-                >
-                  Login di sini
-                </button>
-              </p>
-            )}
-          </div>
         </div>
       </main>
     );
   }
 
-  // --- TAMPILAN DASHBOARD (JIKA LOGIN BERHASIL) ---
+  // ====================================================================
+  // GERBANG 2: MAIN DASHBOARD SCREEN (JIKA SUDAH LOG IN)
+  // ====================================================================
   return (
-    <main className="min-h-screen bg-slate-50 p-4 pb-10">
-      {/* Header Dashboard */}
-      <header className="bg-blue-600 rounded-2xl p-6 mb-6 text-white shadow-lg relative overflow-hidden">
-        <h1 className="text-2xl font-bold">NetLearn: Fase E</h1>
-        <p className="text-blue-100 text-sm mt-1">
-          Halo, <span className="font-bold underline">{siswa.nama_siswa}</span>{" "}
-          🎓
+    <main className="min-h-screen bg-slate-50 p-4 pb-10 max-w-md mx-auto relative">
+      <TourGuide />
+
+    <header 
+      id="step-welcome" 
+      className="rounded-2xl p-6 mb-6 text-white shadow-lg relative overflow-hidden bg-slate-800 bg-cover bg-center"
+      style={{ 
+        backgroundImage: `linear-gradient(to bottom, rgba(30, 41, 59, 0.4), rgba(15, 23, 42, 0.75)), url('https://sbrbrdgpdsneorgjanfr.supabase.co/storage/v1/object/public/materi-pdf/header1.png')` 
+      }}
+    >
+      {/* Efek gradasi pendaran cahaya tambahan */}
+      <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/20 via-transparent to-amber-500/10 pointer-events-none"></div>
+
+      {/* Konten teks diletakkan di dalam container tersendiri agar tidak menabrak tombol */}
+      <div className="relative z-10 pr-16"> 
+        <h1 className="text-2xl font-bold tracking-tight">Belajar Sekarang, Hebat Kemudian</h1>
+        <p className="text-slate-200 text-sm mt-1 font-medium">
+          Halo, <span className="font-bold underline decoration-amber-400 decoration-2">{siswa.nama_siswa}</span>
         </p>
-        <button
-          onClick={() => {
-            localStorage.removeItem("netlearn_siswa_id");
-            setSiswa(null);
-            setNamaInput("");
-            setPasswordInput("");
-          }}
-          className="absolute top-4 right-4 text-xs bg-blue-700/50 hover:bg-blue-700 px-3 py-1.5 rounded-lg text-blue-100 transition-colors font-bold"
-        >
-          Keluar (Logout)
-        </button>
-      </header>
+      </div>
 
-      {/* Daftar Modul */}
+      {/* Tombol Logout diposisikan absolut di pojok kanan atas */}
+      <button
+        onClick={() => {
+          localStorage.removeItem("netlearn_siswa_id");
+          localStorage.removeItem("netlearn_tour_selesai");
+          setSiswa(null);
+          setNamaInput("");
+          setPasswordInput("");
+          setAuthMode("login");
+        }}
+        className="absolute top-4 right-4 text-xs bg-black/30 hover:bg-black/50 backdrop-blur-sm px-3 py-1.5 rounded-lg font-bold transition-all z-20 border border-white/10 active:scale-95"
+      >
+        Logout
+      </button>
+    </header>
+
+      {/* LOOPING CARD MODUL BERDASARKAN DATABASE */}
       <div className="grid gap-6">
-        {/* KARTU MODUL 1 */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md uppercase">
-                Modul 1
-              </span>
-              <h2 className="font-bold text-gray-800 text-lg mt-1">
-                Dasar Jaringan Komputer
-              </h2>
-            </div>
-            <Link href="/modul1">
-              <button className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold active:scale-95 transition-transform shadow-md">
-                {siswa.materi_modul1_selesai > 0 ? "Lanjut Belajar" : "Mulai"}
-              </button>
-            </Link>
-          </div>
+        {daftarModul.map((modul, index) => {
+          const progressDinamis = progressSiswa[modul.id] || {};
+          const attempts = attemptCounts[modul.id] || 0;
 
-          <hr className="my-3 border-gray-100" />
+          let prog = {
+            materi_sesi_selesai: progressDinamis.materi_sesi_selesai || 0,
+            skor_kuis_terakhir: progressDinamis.skor_kuis_terakhir !== undefined ? progressDinamis.skor_kuis_terakhir : null,
+          };
 
-          {/* INDIKATOR PROGRESS */}
-          <div className="space-y-3">
-            <div>
-              <div className="flex justify-between text-xs text-gray-500 mb-1">
-                <span>Progress Materi (Sesi selesai)</span>
-                <span className="font-bold text-gray-700">
-                  {siswa.materi_modul1_selesai} / 3 Sesi
-                </span>
+          if (modul.urutan === 1) {
+            prog.materi_sesi_selesai = siswa.materi_modul1_selesai || 0;
+            prog.skor_kuis_terakhir = siswa.skor_modul1 !== undefined && siswa.skor_modul1 !== null ? siswa.skor_modul1 : progressDinamis.skor_kuis_terakhir !== undefined ? progressDinamis.skor_kuis_terakhir : null;
+          } else if (modul.urutan === 2) {
+            prog.materi_sesi_selesai = siswa.materi_modul2_selesai || 0;
+            prog.skor_kuis_terakhir = siswa.skor_modul2 !== undefined && siswa.skor_modul2 !== null ? siswa.skor_modul2 : progressDinamis.skor_kuis_terakhir !== undefined ? progressDinamis.skor_kuis_terakhir : null;
+          }
+
+          let isLocked = false;
+          if (index > 0) {
+            const modulSebelumnya = daftarModul[index - 1];
+            let skorSebelumnya = 0;
+
+            if (modulSebelumnya.urutan === 1) {
+              skorSebelumnya = siswa.skor_modul1 !== null ? siswa.skor_modul1 : progressSiswa[modulSebelumnya.id]?.skor_kuis_terakhir || 0;
+            } else if (modulSebelumnya.urutan === 2) {
+              skorSebelumnya = siswa.skor_modul2 !== null ? siswa.skor_modul2 : progressSiswa[modulSebelumnya.id]?.skor_kuis_terakhir || 0;
+            } else {
+              skorSebelumnya = progressSiswa[modulSebelumnya.id]?.skor_kuis_terakhir || 0;
+            }
+
+            if (skorSebelumnya < 70) isLocked = true;
+          }
+
+          return (
+            <div
+              key={modul.id}
+              id={modul.urutan === 1 ? "step-modul" : undefined}
+              className={`p-5 rounded-2xl border flex flex-col justify-between transition-all ${isLocked ? "bg-gray-100/70 border-dashed border-gray-200 opacity-60" : "bg-white border-gray-100 shadow-sm"}`}
+            >
+              <div>
+                <div className="flex justify-between items-center">
+                  <span className={`text-xs font-bold px-2 py-1 rounded-md uppercase ${isLocked ? "bg-gray-200 text-gray-500" : "bg-blue-50 text-blue-600"}`}>Modul {modul.urutan}</span>
+                  {isLocked && <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded">🔒 Terkunci</span>}
+                </div>
+                <h2 className="font-bold text-gray-800 text-base mt-2">{modul.judul_modul}</h2>
+                <p className="text-xs text-gray-400 mt-1 leading-relaxed">{modul.deskripsi}</p>
               </div>
-              <div className="w-full bg-gray-100 h-2 rounded-full">
-                <div
-                  className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                  style={{
-                    width: `${(siswa.materi_modul1_selesai / 3) * 100}%`,
-                  }}
-                ></div>
-              </div>
-            </div>
 
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                Status Evaluasi Kuis
-              </p>
-              <p className="text-sm text-gray-700 font-medium mt-1">
-                {getFeedbackKuis(siswa.skor_modul1)}
-              </p>
-              {siswa.skor_modul1 !== null && (
-                <div className="mt-2 w-full bg-gray-200 h-1.5 rounded-full">
-                  <div
-                    className={`h-1.5 rounded-full ${siswa.skor_modul1 >= 70 ? "bg-green-500" : "bg-red-500"}`}
-                    style={{ width: `${siswa.skor_modul1}%` }}
-                  ></div>
+              {!isLocked && (
+                <div className="mt-4 space-y-4">
+                  <hr className="border-gray-100" />
+                  <div id={modul.urutan === 1 ? "step-progress" : undefined} className="text-xs text-gray-500 p-1 rounded">
+                    <div className="flex justify-between mb-1 font-medium">
+                      <span>Progress Belajar:</span>
+                      <span className="font-bold text-gray-700">{prog.materi_sesi_selesai} / 3 Sesi</span>
+                    </div>
+                    <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-blue-500 h-full transition-all" style={{ width: `${(prog.materi_sesi_selesai / 3) * 100}%` }}></div>
+                    </div>
+                  </div>
+
+                  <div id={modul.urutan === 1 ? "step-kuis" : undefined} className="bg-slate-50 p-3 rounded-xl text-xs space-y-1.5 border border-slate-100">
+                    <div className="flex justify-between text-gray-600 font-medium">
+                      <span>Skor Terakhir:</span>
+                      <span className={`font-bold ${prog.skor_kuis_terakhir >= 70 ? "text-green-600" : "text-gray-700"}`}>{prog.skor_kuis_terakhir !== null ? `${prog.skor_kuis_terakhir}%` : "Belum Ujian"}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-400 text-[11px]">
+                      <span>Batas Percobaan:</span>
+                      <span className={`font-bold ${attempts >= 3 ? "text-red-500" : "text-gray-600"}`}>{attempts} / 3</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-1">
+                    <Link href={`/modul${modul.urutan}`} className="w-full">
+                      <button className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition-transform">Lanjut Belajar</button>
+                    </Link>
+
+                    {attempts >= 3 && (prog.skor_kuis_terakhir || 0) < 70 ? (
+                      <button disabled className="w-full bg-gray-100 text-gray-400 py-2.5 rounded-xl text-xs font-bold border cursor-not-allowed">
+                        Percobaan Habis (Terkunci)
+                      </button>
+                    ) : (
+                      <Link href={`/kuis${modul.urutan}`} className="w-full">
+                        <button className="w-full bg-slate-100 border text-slate-700 py-2.5 rounded-xl text-xs font-bold active:scale-95 transition-transform text-center">Ambil Evaluasi Kuis</button>
+                      </Link>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        </div>
-
-        {/* KARTU MODUL 2 (TERKUNCI) */}
-        <div
-          className={`p-5 rounded-2xl border ${siswa.skor_modul1 >= 70 ? "bg-white border-gray-100" : "bg-gray-100/70 border-dashed border-gray-200 opacity-60"}`}
-        >
-          <div className="flex justify-between items-start">
-            <div>
-              <span className="text-xs font-bold text-gray-500 bg-gray-200 px-2 py-1 rounded-md uppercase">
-                Modul 2
-              </span>
-              <h2 className="font-bold text-gray-700 text-lg mt-1">
-                Perangkat Jaringan Komputer
-              </h2>
-              <p className="text-xs text-gray-400 mt-1">
-                Selesaikan Kuis Modul 1 dengan skor ≥ 70 untuk membuka.
-              </p>
-            </div>
-            {siswa.skor_modul1 >= 70 ? (
-              <Link href="/modul2">
-                <button className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-semibold active:scale-95 transition-transform shadow-md">
-                  Mulai
-                </button>
-              </Link>
-            ) : (
-              <span className="text-xl">🔒</span>
-            )}
-          </div>
-        </div>
+          );
+        })}
       </div>
     </main>
   );

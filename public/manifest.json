@@ -1,19 +1,20 @@
 {
-  "name": "NetLearn: Belajar Jaringan",
-  "short_name": "NetLearn",
-  "description": "Aplikasi Pembelajaran Dasar Jaringan Komputer",
-  "start_url": "/",
+  "theme_color": "#2563eb",
+  "background_color": "#f8fafc",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0070f3",
+  "scope": "/",
+  "start_url": "/",
+  "name": "NetLearn Pembelajaran Jaringan",
+  "short_name": "NetLearn",
+  "description": "Aplikasi Pembelajaran Jaringan Komputer Interaktif",
   "icons": [
     {
-      "src": "/icons/icon-192x192.png",
+      "src": "https://placehold.co/192x192/0284c7/ffffff?text=NL",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-512x512.png",
+      "src": "https://placehold.co/512x512/0284c7/ffffff?text=NetLearn",
       "sizes": "512x512",
       "type": "image/png"
     }
