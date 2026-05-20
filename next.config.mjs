@@ -1,15 +1,19 @@
-import withPWAInit from "@ducanh2912/next-pwa";
-
-const withPWA = withPWAInit({
-  dest: 'public',
-  register: true,
-  skipWaiting: true,
-  disable: process.env.NODE_ENV === 'development',
-});
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Isi konfigurasi next.js lainnya di sini jika ada
+  // Mengaktifkan Turbopack kosong agar tidak bentrok dengan sisa-sisa config lama
+  turbopack: {},
+
+  // Jika kamu memakai gambar dari Supabase, pastikan domainnya diizinkan di sini
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "sbrbrdgpdsneorgjanfr.supabase.co",
+        port: "",
+        pathname: "/storage/v1/object/public/**",
+      },
+    ],
+  },
 };
 
-export default withPWA(nextConfig);
+export default nextConfig;
